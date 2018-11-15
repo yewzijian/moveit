@@ -85,7 +85,8 @@ public:
     JOINT_CONSTRAINT,
     POSITION_CONSTRAINT,
     ORIENTATION_CONSTRAINT,
-    VISIBILITY_CONSTRAINT
+    VISIBILITY_CONSTRAINT,
+    LINE_CONSTRAINT
   };
 
   /**
@@ -848,6 +849,168 @@ protected:
   double max_range_angle_;           /**< \brief Storage for the max range angle */
 };
 
+MOVEIT_CLASS_FORWARD(LineConstraint);
+
+/**
+ * \brief Class for constraining the XYZ position of a link to a straight line
+ *
+ * This class expresses X,Y,Z position constraints of a link to a line.
+ * The link is constrained to lie between the end points of the line, and within
+ * up to a certain distance away from the line. The header may either specify a 
+ * fixed frame or a mobile frame.  Additionally, a target offset specified in the 
+ * frame of the link being constrained can be specified.  The type value
+ * will return LINE_CONSTRAINT.
+ *
+ */
+class LineConstraint : public KinematicConstraint
+{
+public:
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+public:
+  /**
+   * \brief Constructor
+   *
+   * @param [in] model The kinematic model used for constraint evaluation
+   */
+  LineConstraint(const robot_model::RobotModelConstPtr& model) : KinematicConstraint(model), link_model_(NULL)
+  {
+    type_ = LINE_CONSTRAINT;
+  }
+
+  /**
+   * \brief Configure the constraint based on a
+   * moveit_msgs::PositionConstraint
+   *
+   * For the configure command to be successful, the link must be
+   * specified in the model, and one or more constrained regions must
+   * be correctly specified, which requires containing a valid shape
+   * and a pose for that shape.  If the header frame on the constraint
+   * is empty, the constraint will fail to configure.  If an invalid
+   * quaternion is passed for a shape, the identity quaternion will be
+   * substituted.
+   *
+   * @param [in] pc moveit_msgs::LineConstraint for configuration
+   *
+   * @return True if constraint can be configured from pc
+   */
+  bool configure(const moveit_msgs::LineConstraint& pc, const robot_state::Transforms& tf);
+
+  /**
+   * \brief Check if two constraints are the same.  For position
+   * constraints this means that:
+   * \li The types are the same
+   * \li The link model is the same
+   * \li The frame of the constraints are the same
+   * \li The start and end points of the line are no more than the margin apart
+   *
+   * Two constraint regions matching each other means that:
+   * \li The poses match within the margin
+   * \li The types are the same
+   * \li The shape volumes are within the margin
+   *
+   * Note that the two shapes can have different numbers of regions as
+   * long as all regions are matched up to another.
+   *
+   * @param [in] other The other constraint to test
+   * @param [in] margin The margin to apply to all values associated with constraint
+   *
+   * @return True if equal, otherwise false
+   */
+  virtual bool equal(const KinematicConstraint& other, double margin) const;
+
+  virtual void clear();
+  virtual ConstraintEvaluationResult decide(const robot_state::RobotState& state, bool verbose = false) const;
+  virtual bool enabled() const;
+  virtual void print(std::ostream& out = std::cout) const;
+
+  /**
+   * \brief Returns the associated link model, or NULL if not enabled
+   *
+   *
+   * @return The link model
+   */
+  const robot_model::LinkModel* getLinkModel() const
+  {
+    return link_model_;
+  }
+
+  /**
+   * \brief Returns the starting point of the line
+   *
+   *
+   * @return The target offset
+   */
+  const Eigen::Vector3d& getLineStart() const
+  {
+    return line_start_;
+  }
+
+  /** \brief Returns the end point of the line
+   *
+   *
+   * @return The target offset
+   */
+  const Eigen::Vector3d& getLineEnd() const
+  {
+    return line_end_;
+  }
+
+  /** \brief Returns the vector joining start and end
+   *
+   *
+   * @return The target offset
+   */
+  const Eigen::Vector3d& getLineVector() const
+  {
+    return v_start_end_;
+  }
+
+  /** \brief Returns the tolerance for the line
+   *
+   *
+   * @return The tolerance
+   */
+  const double& getTolerance() const
+  {
+    return tolerance_;
+  }
+
+
+  /**
+   * \brief Returns the reference frame
+   *
+   *
+   * @return The reference frame
+   */
+  const std::string& getReferenceFrame() const
+  {
+    return constraint_frame_id_;
+  }
+
+  /**
+   * \brief If enabled and the specified frame is a mobile frame,
+   * return true.  Otherwise, returns false.
+   *
+   *
+   * @return Whether a mobile reference frame is being employed
+   */
+  bool mobileReferenceFrame() const
+  {
+    if (!enabled())
+      return false;
+    return mobile_frame_;
+  }
+
+protected:
+  Eigen::Vector3d line_start_, line_end_;            /**< \brief Start and end points of the line */
+  Eigen::Vector3d v_start_end_;                      /**< \brief Vector from start to end */
+  double tolerance_;                                 /**< \brief Distance tolerance from the line */
+  bool mobile_frame_;                                /**< \brief Whether or not a mobile frame is employed*/
+  std::string constraint_frame_id_;                  /**< \brief The constraint frame id */
+  const robot_model::LinkModel* link_model_;         /**< \brief The link model constraint subject */
+};
+
 MOVEIT_CLASS_FORWARD(KinematicConstraintSet);
 
 /**
@@ -928,6 +1091,15 @@ public:
    * @return Will return true only if all constraints are valid, and false otherwise
    */
   bool add(const std::vector<moveit_msgs::VisibilityConstraint>& vc, const robot_state::Transforms& tf);
+
+  /**
+   * \brief Add a vector of line constraints
+   *
+   * @param [in] vc A vector of line constraints
+   *
+   * @return Will return true only if all constraints are valid, and false otherwise
+   */
+  bool add(const std::vector<moveit_msgs::LineConstraint>& lc, const robot_state::Transforms& tf);
 
   /**
    * \brief Determines whether all constraints are satisfied by state,
@@ -1066,6 +1238,8 @@ protected:
                                                                                internal orientation constraints */
   std::vector<moveit_msgs::VisibilityConstraint> visibility_constraints_;   /**<  \brief Messages corresponding to all
                                                                                internal visibility constraints */
+  std::vector<moveit_msgs::LineConstraint> line_constraints_;               /**<  \brief Messages corresponding to all
+                                                                               internal line constraints */
   moveit_msgs::Constraints all_constraints_; /**<  \brief Messages corresponding to all internal constraints */
 };
 }

@@ -1045,6 +1045,146 @@ void VisibilityConstraint::print(std::ostream& out) const
     out << "No constraint" << std::endl;
 }
 
+bool LineConstraint::configure(const moveit_msgs::LineConstraint& lc, const robot_state::Transforms& tf)
+{
+  // clearing before we configure to get rid of any old data
+  clear();
+
+  link_model_ = robot_model_->getLinkModel(lc.link_name);
+  if (link_model_ == nullptr)
+  {
+    ROS_WARN_NAMED("kinematic_constraints",
+                   "Position constraint link model %s not found in kinematic model. Constraint invalid.",
+                   lc.link_name.c_str());
+    return false;
+  }
+
+  if (lc.header.frame_id.empty())
+  {
+    ROS_WARN_NAMED("kinematic_constraints", "No frame specified for position constraint on link '%s'!",
+                   lc.link_name.c_str());
+    return false;
+  }
+
+  line_start_ = Eigen::Vector3d(lc.line_start.x, lc.line_start.y, lc.line_start.z);
+  line_end_ = Eigen::Vector3d(lc.line_end.x, lc.line_end.y, lc.line_end.z);
+  v_start_end_ = line_end_ - line_start_;
+
+  if (tf.isFixedFrame(lc.header.frame_id))
+  {
+    constraint_frame_id_ = tf.getTargetFrame();
+    mobile_frame_ = false;
+  }
+  else
+  {
+    constraint_frame_id_ = lc.header.frame_id;
+    mobile_frame_ = true;
+  }
+
+  if (lc.weight <= std::numeric_limits<double>::epsilon())
+  {
+    ROS_WARN_NAMED("kinematic_constraints",
+                   "The weight on position constraint for link '%s' is near zero.  Setting to 1.0.",
+                   lc.link_name.c_str());
+    constraint_weight_ = 1.0;
+  }
+  else
+    constraint_weight_ = lc.weight;
+
+  tolerance_ = fabs(lc.tolerance);
+  if (tolerance_ < std::numeric_limits<double>::epsilon())
+    ROS_WARN_NAMED("kinematic_constraints", "Near-zero value for line tolerance");
+
+  return v_start_end_.norm() > std::numeric_limits<double>::epsilon();
+}
+
+bool LineConstraint::equal(const KinematicConstraint& other, double margin) const
+{
+  if (other.getType() != type_)
+    return false;
+  const LineConstraint& o = static_cast<const LineConstraint&>(other);
+
+  if (link_model_ == o.link_model_ && robot_state::Transforms::sameFrame(constraint_frame_id_, o.constraint_frame_id_))
+  {
+    if ((line_start_ - o.line_start_).norm() > margin)
+      return false;
+    if ((line_end_ - o.line_end_).norm() > margin)
+      return false;
+    return true;
+  }
+  return false;
+}
+
+// helper function to avoid code duplication
+static inline ConstraintEvaluationResult finishLineConstraintDecision(const Eigen::Vector3d& pt_p,
+                                                                      const Eigen::Vector3d& pt_a,
+                                                                      const Eigen::Vector3d& dir_u,
+                                                                      double tolerance)
+{
+  // Line starts from A, and has direction vector u
+  // We want to find distance between point p and line.
+  Eigen::Vector3d ap = pt_p - pt_a;
+
+  Eigen::Vector3d u_hat = dir_u.normalized();
+  double u_mag = dir_u.norm();
+  double extentOnLine = ap.dot(u_hat) / u_mag;
+  // ROS_INFO_STREAM("extentOnLine: " << extentOnLine);   //TODOZJ
+  if (extentOnLine >= 0 - std::numeric_limits<double>::epsilon()
+      && extentOnLine <= 1 + std::numeric_limits<double>::epsilon()) {
+    double d = ap.cross(dir_u).norm() / u_mag;
+    // ROS_INFO_STREAM("finishLineConstraintDecision: d=" << d << " " << (d <= tolerance));  //TODOZJ
+    return ConstraintEvaluationResult(d <= tolerance, d);
+  } else {
+    // ROS_INFO_STREAM("finishLineConstraintDecision: FAILED");  //TODOZJ
+    return ConstraintEvaluationResult(false, 0.0);
+  }
+}
+
+ConstraintEvaluationResult LineConstraint::decide(const robot_state::RobotState& state, bool verbose) const
+{
+  if (!link_model_ || !enabled())
+    return ConstraintEvaluationResult(true, 0.0);
+
+  // globallinktransform transforms a point on the link to the global frame
+  Eigen::Vector3d pt = state.getGlobalLinkTransform(link_model_) * Eigen::Vector3d(0.0, 0.0, 0.0);
+
+  if (mobile_frame_)
+  {
+    // TODOZJ: Not checked
+    Eigen::Vector3d ptTransformed = state.getFrameTransform(constraint_frame_id_) * pt;
+    return finishLineConstraintDecision(ptTransformed, line_start_, v_start_end_, tolerance_);
+  }
+  else
+  {   
+    return finishLineConstraintDecision(pt, line_start_, v_start_end_, tolerance_);
+  }
+  return ConstraintEvaluationResult(false, 0.0);
+}
+
+void LineConstraint::print(std::ostream& out) const
+{
+  if (enabled())
+    out << "Trajectory constraint on link '" << link_model_->getName() << "'" << std::endl;
+  else
+    out << "No constraint" << std::endl;
+}
+
+void LineConstraint::clear()
+{
+  line_start_ = Eigen::Vector3d(0.0, 0.0, 0.0);
+  line_end_ = Eigen::Vector3d(0.0, 0.0, 0.0);
+  v_start_end_ = Eigen::Vector3d(0.0, 0.0, 0.0);
+  tolerance_ = 0.0;
+  mobile_frame_ = false;
+  constraint_frame_id_ = "";
+  link_model_ = nullptr;
+}
+
+bool LineConstraint::enabled() const
+{
+  return link_model_ && v_start_end_.norm() > std::numeric_limits<double>::epsilon();
+}
+
 void KinematicConstraintSet::clear()
 {
   all_constraints_ = moveit_msgs::Constraints();
@@ -1053,6 +1193,7 @@ void KinematicConstraintSet::clear()
   position_constraints_.clear();
   orientation_constraints_.clear();
   visibility_constraints_.clear();
+  line_constraints_.clear();
 }
 
 bool KinematicConstraintSet::add(const std::vector<moveit_msgs::JointConstraint>& jc)
@@ -1118,13 +1259,30 @@ bool KinematicConstraintSet::add(const std::vector<moveit_msgs::VisibilityConstr
   return result;
 }
 
+bool KinematicConstraintSet::add(const std::vector<moveit_msgs::LineConstraint>& lc,
+                                 const robot_state::Transforms& tf)
+{
+  bool result = true;
+  for (unsigned int i = 0; i < lc.size(); ++i)
+  {
+    LineConstraint* ev = new LineConstraint(robot_model_);
+    bool u = ev->configure(lc[i], tf);
+    result = result && u;
+    kinematic_constraints_.push_back(KinematicConstraintPtr(ev));
+    line_constraints_.push_back(lc[i]);
+    all_constraints_.line_constraints.push_back(lc[i]);
+  }
+  return result;
+}
+
 bool KinematicConstraintSet::add(const moveit_msgs::Constraints& c, const robot_state::Transforms& tf)
 {
   bool j = add(c.joint_constraints);
   bool p = add(c.position_constraints, tf);
   bool o = add(c.orientation_constraints, tf);
   bool v = add(c.visibility_constraints, tf);
-  return j && p && o && v;
+  bool l = add(c.line_constraints, tf);
+  return j && p && o && v && l;
 }
 
 ConstraintEvaluationResult KinematicConstraintSet::decide(const robot_state::RobotState& state, bool verbose) const

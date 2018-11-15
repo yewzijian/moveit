@@ -100,6 +100,10 @@ moveit_msgs::Constraints kinematic_constraints::mergeConstraints(const moveit_ms
   for (std::size_t i = 0; i < second.orientation_constraints.size(); ++i)
     r.orientation_constraints.push_back(second.orientation_constraints[i]);
 
+  r.line_constraints = first.line_constraints;
+  for (std::size_t i = 0; i < second.line_constraints.size(); ++i)
+    r.line_constraints.push_back(second.line_constraints[i]);
+
   r.visibility_constraints = first.visibility_constraints;
   for (std::size_t i = 0; i < second.visibility_constraints.size(); ++i)
     r.visibility_constraints.push_back(second.visibility_constraints[i]);
@@ -110,13 +114,15 @@ moveit_msgs::Constraints kinematic_constraints::mergeConstraints(const moveit_ms
 bool kinematic_constraints::isEmpty(const moveit_msgs::Constraints& constr)
 {
   return constr.position_constraints.empty() && constr.orientation_constraints.empty() &&
-         constr.visibility_constraints.empty() && constr.joint_constraints.empty();
+         constr.visibility_constraints.empty() && constr.joint_constraints.empty() &&
+         constr.line_constraints.empty();
 }
 
 std::size_t kinematic_constraints::countIndividualConstraints(const moveit_msgs::Constraints& constr)
 {
   return constr.position_constraints.size() + constr.orientation_constraints.size() +
-         constr.visibility_constraints.size() + constr.joint_constraints.size();
+         constr.visibility_constraints.size() + constr.joint_constraints.size() +
+         constr.line_constraints.size();
 }
 
 moveit_msgs::Constraints kinematic_constraints::constructGoalConstraints(const robot_state::RobotState& state,

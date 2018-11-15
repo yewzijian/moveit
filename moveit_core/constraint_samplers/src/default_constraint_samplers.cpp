@@ -204,6 +204,11 @@ IKSamplingPose::IKSamplingPose(const kinematic_constraints::OrientationConstrain
 {
 }
 
+IKSamplingPose::IKSamplingPose(const kinematic_constraints::LineConstraint& lc)
+  : line_constraint_(new kinematic_constraints::LineConstraint(lc))
+{
+}
+
 IKSamplingPose::IKSamplingPose(const kinematic_constraints::PositionConstraint& pc,
                                const kinematic_constraints::OrientationConstraint& oc)
   : position_constraint_(new kinematic_constraints::PositionConstraint(pc))
@@ -216,6 +221,10 @@ IKSamplingPose::IKSamplingPose(const kinematic_constraints::PositionConstraintPt
 }
 
 IKSamplingPose::IKSamplingPose(const kinematic_constraints::OrientationConstraintPtr& oc) : orientation_constraint_(oc)
+{
+}
+
+IKSamplingPose::IKSamplingPose(const kinematic_constraints::LineConstraintPtr& lc) : line_constraint_(lc)
 {
 }
 
@@ -238,12 +247,17 @@ void IKConstraintSampler::clear()
 bool IKConstraintSampler::configure(const IKSamplingPose& sp)
 {
   clear();
-  if (!sp.position_constraint_ && !sp.orientation_constraint_)
+  if (!sp.position_constraint_ && !sp.orientation_constraint_ && !sp.line_constraint_)
     return false;
-  if ((!sp.orientation_constraint_ && !sp.position_constraint_->enabled()) ||
-      (!sp.position_constraint_ && !sp.orientation_constraint_->enabled()) ||
-      (sp.position_constraint_ && sp.orientation_constraint_ && !sp.position_constraint_->enabled() &&
-       !sp.orientation_constraint_->enabled()))
+
+  unsigned int numEnabled = 0;
+  if (sp.orientation_constraint_ && sp.orientation_constraint_->enabled())
+    numEnabled++;
+  if (sp.position_constraint_ && sp.position_constraint_->enabled())
+    numEnabled++;
+  if (sp.line_constraint_ && sp.line_constraint_->enabled())
+    numEnabled++;
+  if (numEnabled == 0)
   {
     ROS_WARN_NAMED("constraint_samplers", "No enabled constraints in sampling pose");
     return false;
@@ -306,6 +320,15 @@ bool IKConstraintSampler::configure(const moveit_msgs::Constraints& constr)
     if (oc->configure(constr.orientation_constraints[o], scene_->getTransforms()))
       return configure(IKSamplingPose(oc));
   }
+
+  for (std::size_t l = 0; l < constr.line_constraints.size(); ++l)
+  {
+    kinematic_constraints::LineConstraintPtr lc(
+        new kinematic_constraints::LineConstraint(scene_->getRobotModel()));
+    if (lc->configure(constr.line_constraints[l], scene_->getTransforms()))
+      return configure(IKSamplingPose(lc));
+  }
+
   return false;
 }
 
@@ -321,6 +344,13 @@ double IKConstraintSampler::getSamplingVolume() const
     if (!b.empty())
       v *= vol;
   }
+  else if (sampling_pose_.line_constraint_)
+  {
+    double line_length = sampling_pose_.line_constraint_->getLineVector().norm();
+    double tolerance = sampling_pose_.line_constraint_->getTolerance();
+    
+    v *= line_length * tolerance;
+  }
 
   if (sampling_pose_.orientation_constraint_)
     v *= sampling_pose_.orientation_constraint_->getXAxisTolerance() *
@@ -333,7 +363,9 @@ const std::string& IKConstraintSampler::getLinkName() const
 {
   if (sampling_pose_.orientation_constraint_)
     return sampling_pose_.orientation_constraint_->getLinkModel()->getName();
-  return sampling_pose_.position_constraint_->getLinkModel()->getName();
+  else if (sampling_pose_.orientation_constraint_)
+    return sampling_pose_.position_constraint_->getLinkModel()->getName();
+  return sampling_pose_.line_constraint_->getLinkModel()->getName();
 }
 
 bool IKConstraintSampler::loadIKSolver()
@@ -382,6 +414,24 @@ bool IKConstraintSampler::loadIKSolver()
   if (!wrong_link && sampling_pose_.orientation_constraint_)
   {
     const moveit::core::LinkModel* lm = sampling_pose_.orientation_constraint_->getLinkModel();
+    if (!robot_state::Transforms::sameFrame(kb_->getTipFrame(), lm->getName()))
+    {
+      wrong_link = true;
+      const moveit::core::LinkTransformMap& fixed_links = lm->getAssociatedFixedTransforms();
+      for (moveit::core::LinkTransformMap::const_iterator it = fixed_links.begin(); it != fixed_links.end(); ++it)
+        if (moveit::core::Transforms::sameFrame(it->first->getName(), kb_->getTipFrame()))
+        {
+          eef_to_ik_tip_transform_ = it->second;
+          need_eef_to_ik_tip_transform_ = true;
+          wrong_link = false;
+          break;
+        }
+    }
+  }
+
+  if (!wrong_link && sampling_pose_.line_constraint_)
+  {
+    const moveit::core::LinkModel* lm = sampling_pose_.line_constraint_->getLinkModel();
     if (!robot_state::Transforms::sameFrame(kb_->getTipFrame(), lm->getName()))
     {
       wrong_link = true;
@@ -452,6 +502,23 @@ bool IKConstraintSampler::samplePose(Eigen::Vector3d& pos, Eigen::Quaterniond& q
     // model
     if (sampling_pose_.position_constraint_->mobileReferenceFrame())
       pos = ks.getFrameTransform(sampling_pose_.position_constraint_->getReferenceFrame()) * pos;
+  }
+  else if (sampling_pose_.line_constraint_)
+  {
+    double ratio = random_number_generator_.uniform01();
+    const Eigen::Vector3d line_start = sampling_pose_.line_constraint_->getLineStart();
+    const Eigen::Vector3d line_vector = sampling_pose_.line_constraint_->getLineVector();
+
+    pos = line_start + ratio * line_vector;
+    pos[0] += random_number_generator_.uniform01() * sampling_pose_.line_constraint_->getTolerance();
+    pos[1] += random_number_generator_.uniform01() * sampling_pose_.line_constraint_->getTolerance();
+    pos[2] += random_number_generator_.uniform01() * sampling_pose_.line_constraint_->getTolerance();
+
+    // if this constraint is with respect a mobile frame, we need to convert this rotation to the root frame of the
+    // model
+    if (sampling_pose_.line_constraint_->mobileReferenceFrame()) {
+      pos = ks.getFrameTransform(sampling_pose_.line_constraint_->getReferenceFrame()) * pos;
+    }
   }
   else
   {
@@ -600,7 +667,9 @@ bool IKConstraintSampler::validate(robot_state::RobotState& state) const
   return (!sampling_pose_.orientation_constraint_ ||
           sampling_pose_.orientation_constraint_->decide(state, verbose_).satisfied) &&
          (!sampling_pose_.position_constraint_ ||
-          sampling_pose_.position_constraint_->decide(state, verbose_).satisfied);
+          sampling_pose_.position_constraint_->decide(state, verbose_).satisfied) &&
+         (!sampling_pose_.line_constraint_ ||
+          sampling_pose_.line_constraint_->decide(state, verbose_).satisfied);
 }
 
 bool IKConstraintSampler::callIK(const geometry_msgs::Pose& ik_query,
