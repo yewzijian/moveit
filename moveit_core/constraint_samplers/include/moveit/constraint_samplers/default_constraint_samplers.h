@@ -255,6 +255,18 @@ struct IKSamplingPose
                  const kinematic_constraints::OrientationConstraint& oc);
 
   /**
+   * \brief Constructor that takes both a line and an orientation
+   * constraint, copying both into the internal variables
+   *
+   * @param lc line pose constraint that will be copied into the internal variable
+   * @param oc The orientation constraint that will be copied into the internal variable
+   *
+   * @return
+   */
+  IKSamplingPose(const kinematic_constraints::LineConstraint& lc,
+                 const kinematic_constraints::OrientationConstraint& oc);
+
+  /**
    * \brief Constructor that takes a pointer to a position constraint.
    *
    * @param pc Pointer for copying into internal variable
@@ -290,6 +302,17 @@ struct IKSamplingPose
    * @return
    */
   IKSamplingPose(const kinematic_constraints::PositionConstraintPtr& pc,
+                 const kinematic_constraints::OrientationConstraintPtr& oc);
+
+  /**
+   * \brief Constructor that takes a pointer to both line and orientation constraints.
+   *
+   * @param lc Pointer for copying into internal variables
+   * @param oc Pointer for copying into internal variable
+   *
+   * @return
+   */
+  IKSamplingPose(const kinematic_constraints::LineConstraintPtr& lc,
                  const kinematic_constraints::OrientationConstraintPtr& oc);
 
   kinematic_constraints::PositionConstraintPtr position_constraint_; /**< \brief Holds the position constraint for

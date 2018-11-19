@@ -216,6 +216,13 @@ IKSamplingPose::IKSamplingPose(const kinematic_constraints::PositionConstraint& 
 {
 }
 
+IKSamplingPose::IKSamplingPose(const kinematic_constraints::LineConstraint& lc,
+                               const kinematic_constraints::OrientationConstraint& oc)
+  : orientation_constraint_(new kinematic_constraints::OrientationConstraint(oc)),
+    line_constraint_(new kinematic_constraints::LineConstraint(lc))
+{
+}
+
 IKSamplingPose::IKSamplingPose(const kinematic_constraints::PositionConstraintPtr& pc) : position_constraint_(pc)
 {
 }
@@ -231,6 +238,12 @@ IKSamplingPose::IKSamplingPose(const kinematic_constraints::LineConstraintPtr& l
 IKSamplingPose::IKSamplingPose(const kinematic_constraints::PositionConstraintPtr& pc,
                                const kinematic_constraints::OrientationConstraintPtr& oc)
   : position_constraint_(pc), orientation_constraint_(oc)
+{
+}
+
+IKSamplingPose::IKSamplingPose(const kinematic_constraints::LineConstraintPtr& lc,
+                               const kinematic_constraints::OrientationConstraintPtr& oc)
+  : orientation_constraint_(oc), line_constraint_(lc)
 {
 }
 
@@ -363,7 +376,7 @@ const std::string& IKConstraintSampler::getLinkName() const
 {
   if (sampling_pose_.orientation_constraint_)
     return sampling_pose_.orientation_constraint_->getLinkModel()->getName();
-  else if (sampling_pose_.orientation_constraint_)
+  else if (sampling_pose_.position_constraint_)
     return sampling_pose_.position_constraint_->getLinkModel()->getName();
   return sampling_pose_.line_constraint_->getLinkModel()->getName();
 }

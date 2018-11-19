@@ -183,6 +183,42 @@ constraint_samplers::ConstraintSamplerPtr constraint_samplers::ConstraintSampler
           }
         }
 
+    // Alternatively if we have line and/or orientation constraints on links that we can perform IK for,
+    // we will use a sampleable goal region that employs IK to sample goals;
+    // if there are multiple constraints for the same link, we keep the one with the smallest
+    // volume for sampling
+    for (std::size_t l = 0; l < constr.line_constraints.size(); ++l)
+      for (std::size_t o = 0; o < constr.orientation_constraints.size(); ++o)
+        if (constr.line_constraints[l].link_name == constr.orientation_constraints[o].link_name)
+        {
+          kinematic_constraints::LineConstraintPtr lc(
+              new kinematic_constraints::LineConstraint(scene->getRobotModel()));
+          kinematic_constraints::OrientationConstraintPtr oc(
+              new kinematic_constraints::OrientationConstraint(scene->getRobotModel()));
+          if (lc->configure(constr.line_constraints[l], scene->getTransforms()) &&
+              oc->configure(constr.orientation_constraints[o], scene->getTransforms()))
+          {
+            IKConstraintSamplerPtr iks(new IKConstraintSampler(scene, jmg->getName()));
+            if (iks->configure(IKSamplingPose(lc, oc)))
+            {
+              bool use = true;
+              // Check if there already is a constraint on this link
+              if (used_l.find(constr.line_constraints[l].link_name) != used_l.end())
+                // If there is, check if the previous one has a smaller volume for sampling
+                if (used_l[constr.line_constraints[l].link_name]->getSamplingVolume() < iks->getSamplingVolume())
+                  use = false;  // only use new constraint if it has a smaller sampling volume
+              if (use)
+              {
+                // assign the link to a new constraint sampler
+                used_l[constr.line_constraints[l].link_name] = iks;
+                ROS_DEBUG_NAMED("constraint_samplers", "Allocated an IK-based sampler for group '%s' "
+                                                       "satisfying line and orientation constraints on link '%s'",
+                                jmg->getName().c_str(), constr.line_constraints[l].link_name.c_str());
+              }
+            }
+          }
+        }
+
     // keep track of links constrained with a full pose
     std::map<std::string, IKConstraintSamplerPtr> used_l_full_pose = used_l;
 
