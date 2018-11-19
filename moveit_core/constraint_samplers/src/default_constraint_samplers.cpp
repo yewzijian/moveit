@@ -523,9 +523,6 @@ bool IKConstraintSampler::samplePose(Eigen::Vector3d& pos, Eigen::Quaterniond& q
     const Eigen::Vector3d line_vector = sampling_pose_.line_constraint_->getLineVector();
 
     pos = line_start + ratio * line_vector;
-    pos[0] += random_number_generator_.uniform01() * sampling_pose_.line_constraint_->getTolerance();
-    pos[1] += random_number_generator_.uniform01() * sampling_pose_.line_constraint_->getTolerance();
-    pos[2] += random_number_generator_.uniform01() * sampling_pose_.line_constraint_->getTolerance();
 
     // if this constraint is with respect a mobile frame, we need to convert this rotation to the root frame of the
     // model
