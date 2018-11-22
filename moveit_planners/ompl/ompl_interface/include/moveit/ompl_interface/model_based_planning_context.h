@@ -37,6 +37,7 @@
 #ifndef MOVEIT_OMPL_INTERFACE_MODEL_BASED_PLANNING_CONTEXT_
 #define MOVEIT_OMPL_INTERFACE_MODEL_BASED_PLANNING_CONTEXT_
 
+#include <moveit/ompl_interface/ompl_constraint.h>
 #include <moveit/ompl_interface/parameterization/model_based_state_space.h>
 #include <moveit/ompl_interface/detail/constrained_valid_state_sampler.h>
 #include <moveit/constraint_samplers/constraint_sampler_manager.h>
@@ -70,6 +71,9 @@ struct ModelBasedPlanningContextSpecification
   constraint_samplers::ConstraintSamplerManagerPtr constraint_sampler_manager_;
 
   ModelBasedStateSpacePtr state_space_;
+  ob::ConstrainedStateSpacePtr constrained_state_space_;
+  ob::SpaceInformationPtr constrained_space_info_;
+
   std::vector<ModelBasedStateSpacePtr> subspaces_;
   og::SimpleSetupPtr ompl_simple_setup_;  // pass in the correct simple setup type
 };

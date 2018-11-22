@@ -1128,14 +1128,15 @@ static inline ConstraintEvaluationResult finishLineConstraintDecision(const Eige
   Eigen::Vector3d u_hat = dir_u.normalized();
   double u_mag = dir_u.norm();
   double extentOnLine = ap.dot(u_hat) / u_mag;
-  // ROS_INFO_STREAM("extentOnLine: " << extentOnLine);   //TODOZJ
   if (extentOnLine >= 0 - std::numeric_limits<double>::epsilon()
       && extentOnLine <= 1 + std::numeric_limits<double>::epsilon()) {
     double d = ap.cross(dir_u).norm() / u_mag;
-    // ROS_INFO_STREAM("finishLineConstraintDecision: d=" << d << " " << (d <= tolerance));  //TODOZJ
+    // if (d > tolerance) {
+    //   ROS_INFO_STREAM("extentOnLine: " << extentOnLine << " finishLineConstraintDecision: " << d);  //TODOZJ
+    // }
     return ConstraintEvaluationResult(d <= tolerance, d);
   } else {
-    // ROS_INFO_STREAM("finishLineConstraintDecision: FAILED");  //TODOZJ
+    // ROS_INFO_STREAM("extentOnLine not satisified: " << extentOnLine);   //TODOZJ
     return ConstraintEvaluationResult(false, 0.0);
   }
 }

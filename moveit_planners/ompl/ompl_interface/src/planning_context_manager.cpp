@@ -71,6 +71,7 @@
 #include <moveit/ompl_interface/parameterization/joint_space/joint_model_state_space_factory.h>
 #include <moveit/ompl_interface/parameterization/joint_space/joint_model_state_space.h>
 #include <moveit/ompl_interface/parameterization/work_space/pose_model_state_space_factory.h>
+#include <moveit/ompl_interface/ompl_constraint.h>
 
 using namespace std::placeholders;
 
@@ -110,6 +111,7 @@ struct PlanningContextManager::CachedContexts
 };
 
 }  // namespace ompl_interface
+
 
 ompl_interface::PlanningContextManager::PlanningContextManager(robot_model::RobotModelConstPtr robot_model,
                                                                constraint_samplers::ConstraintSamplerManagerPtr csm)
@@ -257,6 +259,7 @@ void ompl_interface::PlanningContextManager::setPlannerConfigurations(
 ompl_interface::ModelBasedPlanningContextPtr ompl_interface::PlanningContextManager::getPlanningContext(
     const std::string& config, const std::string& factory_type) const
 {
+  ROS_INFO_STREAM("This isn't called I hope?");
   auto pc = planner_configs_.find(config);
 
   if (pc != planner_configs_.end())
@@ -277,6 +280,7 @@ ompl_interface::ModelBasedPlanningContextPtr ompl_interface::PlanningContextMana
     const planning_interface::PlannerConfigurationSettings& config,
     const StateSpaceFactoryTypeSelector& factory_selector, const moveit_msgs::MotionPlanRequest& req) const
 {
+  ROS_INFO_STREAM("getPlanningContext 2");
   const ompl_interface::ModelBasedStateSpaceFactoryPtr& factory = factory_selector(config.group);
 
   // Check for a cached planning context
@@ -300,44 +304,91 @@ ompl_interface::ModelBasedPlanningContextPtr ompl_interface::PlanningContextMana
   // Create a new planning context
   if (!context)
   {
-    ModelBasedStateSpaceSpecification space_spec(robot_model_, config.group);
-    ModelBasedPlanningContextSpecification context_spec;
-    context_spec.config_ = config.config;
-    context_spec.planner_selector_ = getPlannerSelector();
-    context_spec.constraint_sampler_manager_ = constraint_sampler_manager_;
-    context_spec.state_space_ = factory->getNewStateSpace(space_spec);
+    const bool USE_CONSTRAINED_PLANNING = false;
+    if (USE_CONSTRAINED_PLANNING) {
+      ModelBasedStateSpaceSpecification space_spec(robot_model_, config.group);
+      ModelBasedPlanningContextSpecification context_spec;
+      context_spec.config_ = config.config;
+      context_spec.planner_selector_ = getPlannerSelector();
+      context_spec.constraint_sampler_manager_ = constraint_sampler_manager_;
+      context_spec.state_space_ = factory->getNewStateSpace(space_spec);
+      ROS_INFO_STREAM("Space: " << context_spec.state_space_->getName());
+      
+      // Constrained state space
+      auto constraint = std::make_shared<MoveitConstraint>(context_spec.state_space_);
+      context_spec.constrained_state_space_ = std::make_shared<ob::ProjectedStateSpace>(context_spec.state_space_, constraint);
+      context_spec.constrained_space_info_ = std::make_shared<ob::ConstrainedSpaceInformation>(context_spec.constrained_state_space_);
 
-    // Choose the correct simple setup type to load
-    context_spec.ompl_simple_setup_.reset(new ompl::geometric::SimpleSetup(context_spec.state_space_));
+      context_spec.ompl_simple_setup_.reset(new ompl::geometric::SimpleSetup(context_spec.constrained_space_info_));
+      // // context_spec.ompl_simple_setup_.reset(new ompl::geometric::SimpleSetup(context_spec.state_space_));
 
-    bool state_validity_cache = true;
-    if (config.config.find("subspaces") != config.config.end())
-    {
-      context_spec.config_.erase("subspaces");
-      // if the planner operates at subspace level the cache may be unsafe
-      state_validity_cache = false;
-      boost::char_separator<char> sep(" ");
-      boost::tokenizer<boost::char_separator<char> > tok(config.config.at("subspaces"), sep);
-      for (boost::tokenizer<boost::char_separator<char> >::iterator beg = tok.begin(); beg != tok.end(); ++beg)
+      bool state_validity_cache = true;
+      if (config.config.find("subspaces") != config.config.end())
       {
-        const ompl_interface::ModelBasedStateSpaceFactoryPtr& sub_fact = factory_selector(*beg);
-        if (sub_fact)
+        context_spec.config_.erase("subspaces");
+        // if the planner operates at subspace level the cache may be unsafe
+        state_validity_cache = false;
+        boost::char_separator<char> sep(" ");
+        boost::tokenizer<boost::char_separator<char> > tok(config.config.at("subspaces"), sep);
+        for (boost::tokenizer<boost::char_separator<char> >::iterator beg = tok.begin(); beg != tok.end(); ++beg)
         {
-          ModelBasedStateSpaceSpecification sub_space_spec(robot_model_, *beg);
-          context_spec.subspaces_.push_back(sub_fact->getNewStateSpace(sub_space_spec));
+          const ompl_interface::ModelBasedStateSpaceFactoryPtr& sub_fact = factory_selector(*beg);
+          if (sub_fact)
+          {
+            ModelBasedStateSpaceSpecification sub_space_spec(robot_model_, *beg);
+            context_spec.subspaces_.push_back(sub_fact->getNewStateSpace(sub_space_spec));
+          }
         }
       }
-    }
 
-    ROS_DEBUG_NAMED("planning_context_manager", "Creating new planning context");
-    context.reset(new ModelBasedPlanningContext(config.name, context_spec));
-    context->useStateValidityCache(state_validity_cache);
-    {
-      std::unique_lock<std::mutex> slock(cached_contexts_->lock_);
-      cached_contexts_->contexts_[std::make_pair(config.name, factory->getType())].push_back(context);
-    }
+      ROS_DEBUG_NAMED("planning_context_manager", "Creating new planning context");
+      context.reset(new ConstrainedPlanningContext(config.name, context_spec));
+      context->useStateValidityCache(state_validity_cache);
+      {
+        std::unique_lock<std::mutex> slock(cached_contexts_->lock_);
+        cached_contexts_->contexts_[std::make_pair(config.name, factory->getType())].push_back(context);
+      }
+    } else {
+      ModelBasedStateSpaceSpecification space_spec(robot_model_, config.group);
+      ModelBasedPlanningContextSpecification context_spec;
+      context_spec.config_ = config.config;
+      context_spec.planner_selector_ = getPlannerSelector();
+      context_spec.constraint_sampler_manager_ = constraint_sampler_manager_;
+      context_spec.state_space_ = factory->getNewStateSpace(space_spec);
+
+      // Choose the correct simple setup type to load
+      context_spec.ompl_simple_setup_.reset(new ompl::geometric::SimpleSetup(context_spec.state_space_));
+
+      bool state_validity_cache = true;
+      if (config.config.find("subspaces") != config.config.end())
+      {
+        context_spec.config_.erase("subspaces");
+        // if the planner operates at subspace level the cache may be unsafe
+        state_validity_cache = false;
+        boost::char_separator<char> sep(" ");
+        boost::tokenizer<boost::char_separator<char> > tok(config.config.at("subspaces"), sep);
+        for (boost::tokenizer<boost::char_separator<char> >::iterator beg = tok.begin(); beg != tok.end(); ++beg)
+        {
+          const ompl_interface::ModelBasedStateSpaceFactoryPtr& sub_fact = factory_selector(*beg);
+          if (sub_fact)
+          {
+            ModelBasedStateSpaceSpecification sub_space_spec(robot_model_, *beg);
+            context_spec.subspaces_.push_back(sub_fact->getNewStateSpace(sub_space_spec));
+          }
+        }
+      }
+
+      ROS_DEBUG_NAMED("planning_context_manager", "Creating new planning context");
+      context.reset(new ModelBasedPlanningContext(config.name, context_spec));
+      context->useStateValidityCache(state_validity_cache);
+      {
+        std::unique_lock<std::mutex> slock(cached_contexts_->lock_);
+        cached_contexts_->contexts_[std::make_pair(config.name, factory->getType())].push_back(context);
+      }
+    }    
   }
 
+  ROS_INFO_STREAM("Finished Creating context");
   context->setMaximumPlanningThreads(max_planning_threads_);
   context->setMaximumGoalSamples(max_goal_samples_);
   context->setMaximumStateSamplingAttempts(max_state_sampling_attempts_);
@@ -392,7 +443,7 @@ const ompl_interface::ModelBasedStateSpaceFactoryPtr& ompl_interface::PlanningCo
   }
   else
   {
-    ROS_DEBUG_NAMED("planning_context_manager", "Using '%s' parameterization for solving problem", best->first.c_str());
+    ROS_INFO_NAMED("planning_context_manager", "Using '%s' parameterization for solving problem", best->first.c_str());
     return best->second;
   }
 }
@@ -401,6 +452,7 @@ ompl_interface::ModelBasedPlanningContextPtr ompl_interface::PlanningContextMana
     const planning_scene::PlanningSceneConstPtr& planning_scene, const moveit_msgs::MotionPlanRequest& req,
     moveit_msgs::MoveItErrorCodes& error_code) const
 {
+  ROS_INFO_STREAM("getPlanningContext 1");
   if (req.group_name.empty())
   {
     ROS_ERROR_NAMED("planning_context_manager", "No group specified to plan for");
@@ -467,17 +519,23 @@ ompl_interface::ModelBasedPlanningContextPtr ompl_interface::PlanningContextMana
     // Setup the context
     context->setPlanningScene(planning_scene);
     context->setMotionPlanRequest(req);
+    ROS_INFO_STREAM("context->setCompleteInitialState");
     context->setCompleteInitialState(*start_state);
 
     context->setPlanningVolume(req.workspace_parameters);
-    if (!context->setPathConstraints(req.path_constraints, &error_code))
+    if (!context->setPathConstraints(req.path_constraints, &error_code)) {
+      ROS_INFO_STREAM("context->setPathConstraints");
       return ModelBasedPlanningContextPtr();
+    }
 
-    if (!context->setGoalConstraints(req.goal_constraints, req.path_constraints, &error_code))
+    if (!context->setGoalConstraints(req.goal_constraints, req.path_constraints, &error_code)) {
+      ROS_INFO_STREAM("context->setGoalConstraints");
       return ModelBasedPlanningContextPtr();
+    }
 
     try
     {
+      ROS_INFO_STREAM("Configure!");
       context->configure();
       ROS_DEBUG_NAMED("planning_context_manager", "%s: New planning context is set.", context->getName().c_str());
       error_code.val = moveit_msgs::MoveItErrorCodes::SUCCESS;

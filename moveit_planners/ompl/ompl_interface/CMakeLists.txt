@@ -4,7 +4,9 @@ add_library(${MOVEIT_LIB_NAME}
   src/ompl_interface.cpp
   src/planning_context_manager.cpp
   src/constraints_library.cpp
+  src/ompl_constraint.cpp
   src/model_based_planning_context.cpp
+  src/constrained_planning_context.cpp
   src/parameterization/model_based_state_space.cpp
   src/parameterization/model_based_state_space_factory.cpp
   src/parameterization/joint_space/joint_model_state_space.cpp

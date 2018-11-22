@@ -48,6 +48,7 @@ constraint_samplers::ConstraintSamplerPtr constraint_samplers::ConstraintSampler
       return sampler_alloc_[i]->alloc(scene, group_name, constr);
 
   // if no default sampler was used, try a default one
+  ROS_INFO_STREAM("constraint_samplers - selectDefaultSampler");
   return selectDefaultSampler(scene, group_name, constr);
 }
 

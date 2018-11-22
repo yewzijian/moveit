@@ -49,7 +49,9 @@ bool callPlannerInterfaceSolve(const planning_interface::PlannerManager* planner
                                const planning_interface::MotionPlanRequest& req,
                                planning_interface::MotionPlanResponse& res)
 {
+  ROS_INFO_STREAM("callPlannerInterfaceSolve");
   planning_interface::PlanningContextPtr context = planner->getPlanningContext(planning_scene, req, res.error_code_);
+  ROS_INFO_STREAM("Solving...");
   if (context)
     return context->solve(res);
   else

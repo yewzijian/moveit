@@ -60,6 +60,7 @@ ompl_interface::PoseModelStateSpace::PoseModelStateSpace(const ModelBasedStateSp
                                               "PoseModelStateSpace");
   else
     std::sort(poses_.begin(), poses_.end());
+
   setName(getName() + "_" + PARAMETERIZATION_TYPE);
 }
 

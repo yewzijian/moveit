@@ -36,6 +36,7 @@
 
 #include <moveit/ompl_interface/parameterization/model_based_state_space.h>
 #include <utility>
+#include <ompl/base/ScopedState.h>
 
 ompl_interface::ModelBasedStateSpace::ModelBasedStateSpace(ModelBasedStateSpaceSpecification spec)
   : ompl::base::StateSpace(), spec_(std::move(spec))
@@ -326,6 +327,7 @@ void ompl_interface::ModelBasedStateSpace::copyToOMPLState(ompl::base::State* st
                                                            const robot_state::RobotState& rstate) const
 {
   rstate.copyJointGroupPositions(spec_.joint_model_group_, state->as<StateType>()->values);
+
   // clear any cached info (such as validity known or not)
   state->as<StateType>()->clearKnownInformation();
 }

@@ -265,6 +265,7 @@ void ompl_interface::ModelBasedPlanningContext::useConfig()
   it = cfg.find("projection_evaluator");
   if (it != cfg.end())
   {
+    ROS_INFO_STREAM("useConfig-setProjectionEvaluator");
     setProjectionEvaluator(boost::trim_copy(it->second));
     cfg.erase(it);
   }
@@ -286,6 +287,7 @@ void ompl_interface::ModelBasedPlanningContext::useConfig()
     optimizer = it->second;
     cfg.erase(it);
   }
+  ROS_INFO_STREAM("useConfig-beforeResetObjective");
 
   if (optimizer == "PathLengthOptimizationObjective")
   {
@@ -312,6 +314,7 @@ void ompl_interface::ModelBasedPlanningContext::useConfig()
     objective.reset(new ompl::base::PathLengthOptimizationObjective(ompl_simple_setup_->getSpaceInformation()));
   }
 
+  ROS_INFO_STREAM("useConfig-setOptimizationObjective");
   ompl_simple_setup_->setOptimizationObjective(objective);
 
   // remove the 'type' parameter; the rest are parameters for the planner itself
@@ -334,9 +337,13 @@ void ompl_interface::ModelBasedPlanningContext::useConfig()
                    name_.c_str(), type.c_str());
   }
 
+  ROS_INFO_STREAM("useConfig-getSpaceInformation()->setup");
+
   // call the setParams() after setup(), so we know what the params are
   ompl_simple_setup_->getSpaceInformation()->setup();
+  ROS_INFO_STREAM("after useConfig-getSpaceInformation()->setup");
   ompl_simple_setup_->getSpaceInformation()->params().setParams(cfg, true);
+  ROS_INFO_STREAM("useConfig-getSpaceInformation()->setup2");
   // call setup() again for possibly new param values
   ompl_simple_setup_->getSpaceInformation()->setup();
 }
@@ -421,14 +428,14 @@ void ompl_interface::ModelBasedPlanningContext::setVerboseStateValidityChecks(bo
 ompl::base::GoalPtr ompl_interface::ModelBasedPlanningContext::constructGoal()
 {
   // ******************* set up the goal representation, based on goal constraints
-
   std::vector<ob::GoalPtr> goals;
   for (kinematic_constraints::KinematicConstraintSetPtr& goal_constraint : goal_constraints_)
   {
     constraint_samplers::ConstraintSamplerPtr cs;
-    if (spec_.constraint_sampler_manager_)
+    if (spec_.constraint_sampler_manager_) {
       cs = spec_.constraint_sampler_manager_->selectSampler(getPlanningScene(), getGroupName(),
                                                             goal_constraint->getAllConstraints());
+    }
     if (cs)
     {
       ob::GoalPtr g = ob::GoalPtr(new ConstrainedGoalSampler(this, goal_constraint, cs));
@@ -477,6 +484,7 @@ bool ompl_interface::ModelBasedPlanningContext::setGoalConstraints(
     const std::vector<moveit_msgs::Constraints>& goal_constraints, const moveit_msgs::Constraints& path_constraints,
     moveit_msgs::MoveItErrorCodes* error)
 {
+  ROS_INFO_STREAM("Set goal constraints");
   // ******************* check if the input is correct
   goal_constraints_.clear();
   for (const moveit_msgs::Constraints& goal_constraint : goal_constraints)
@@ -499,6 +507,7 @@ bool ompl_interface::ModelBasedPlanningContext::setGoalConstraints(
   }
 
   ob::GoalPtr goal = constructGoal();
+  ROS_INFO_STREAM("Setting goal to: " << goal);
   ompl_simple_setup_->setGoal(goal);
   return static_cast<bool>(goal);
 }
@@ -576,8 +585,9 @@ bool ompl_interface::ModelBasedPlanningContext::solve(planning_interface::Motion
     interpolateSolution();
 
     // fill the response
-    ROS_DEBUG_NAMED("model_based_planning_context", "%s: Returning successful solution with %lu states",
+    ROS_INFO_NAMED("model_based_planning_context", "%s: Returning successful solution with %lu states",
                     getName().c_str(), getOMPLSimpleSetup()->getSolutionPath().getStateCount());
+    // getOMPLSimpleSetup()->getSolutionPath().print(std::cout);
 
     res.trajectory_.reset(new robot_trajectory::RobotTrajectory(getRobotModel(), getGroupName()));
     getSolutionPath(*res.trajectory_);
