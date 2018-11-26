@@ -204,6 +204,13 @@ IKSamplingPose::IKSamplingPose(const kinematic_constraints::OrientationConstrain
 {
 }
 
+// NEW
+IKSamplingPose::IKSamplingPose(const kinematic_constraints::CircleConstraint& cc)
+  : circle_constraint_(new kinematic_constraints::CircleConstraint(cc))
+{
+}
+
+
 IKSamplingPose::IKSamplingPose(const kinematic_constraints::LineConstraint& lc)
   : line_constraint_(new kinematic_constraints::LineConstraint(lc))
 {
@@ -223,6 +230,15 @@ IKSamplingPose::IKSamplingPose(const kinematic_constraints::LineConstraint& lc,
 {
 }
 
+// NEW
+IKSamplingPose::IKSamplingPose(const kinematic_constraints::CircleConstraint& cc,
+                               const kinematic_constraints::OrientationConstraint& oc)
+  : orientation_constraint_(new kinematic_constraints::OrientationConstraint(oc)),
+    circle_constraint_(new kinematic_constraints::CircleConstraint(cc))
+{
+}
+
+
 IKSamplingPose::IKSamplingPose(const kinematic_constraints::PositionConstraintPtr& pc) : position_constraint_(pc)
 {
 }
@@ -231,9 +247,15 @@ IKSamplingPose::IKSamplingPose(const kinematic_constraints::OrientationConstrain
 {
 }
 
+// NEW
+IKSamplingPose::IKSamplingPose(const kinematic_constraints::CircleConstraintPtr& cc) : circle_constraint_(cc)
+{
+}
+
 IKSamplingPose::IKSamplingPose(const kinematic_constraints::LineConstraintPtr& lc) : line_constraint_(lc)
 {
 }
+
 
 IKSamplingPose::IKSamplingPose(const kinematic_constraints::PositionConstraintPtr& pc,
                                const kinematic_constraints::OrientationConstraintPtr& oc)
@@ -246,6 +268,18 @@ IKSamplingPose::IKSamplingPose(const kinematic_constraints::LineConstraintPtr& l
   : orientation_constraint_(oc), line_constraint_(lc)
 {
 }
+
+IKSamplingPose::IKSamplingPose(const kinematic_constraints::CircleConstraintPtr& cc,
+                               const kinematic_constraints::OrientationConstraintPtr& oc)
+  : orientation_constraint_(oc), circle_constraint_(cc)
+{
+}
+
+// IKSamplingPose::IKSamplingPose(const kinematic_constraints::LineConstraintPtr& lc,
+//                                const kinematic_constraints::CircleConstraintPtr& cc)
+//   : circle_constraint_(cc), line_constraint_(lc)
+// {
+// }
 
 void IKConstraintSampler::clear()
 {
@@ -260,7 +294,7 @@ void IKConstraintSampler::clear()
 bool IKConstraintSampler::configure(const IKSamplingPose& sp)
 {
   clear();
-  if (!sp.position_constraint_ && !sp.orientation_constraint_ && !sp.line_constraint_)
+  if (!sp.position_constraint_ && !sp.orientation_constraint_ && !sp.line_constraint_ && !sp.circle_constraint_)
     return false;
 
   unsigned int numEnabled = 0;
@@ -269,6 +303,8 @@ bool IKConstraintSampler::configure(const IKSamplingPose& sp)
   if (sp.position_constraint_ && sp.position_constraint_->enabled())
     numEnabled++;
   if (sp.line_constraint_ && sp.line_constraint_->enabled())
+    numEnabled++;
+  if (sp.circle_constraint_ && sp.circle_constraint_->enabled())
     numEnabled++;
   if (numEnabled == 0)
   {
@@ -342,6 +378,16 @@ bool IKConstraintSampler::configure(const moveit_msgs::Constraints& constr)
       return configure(IKSamplingPose(lc));
   }
 
+  // NEW
+  for (std::size_t l = 0; l < constr.circle_constraints.size(); ++l)
+  {
+  	//ROS_INFO_STREAM("--- Circle constraint size: " << constr.circle_constraints.size());
+    kinematic_constraints::CircleConstraintPtr cc(
+        new kinematic_constraints::CircleConstraint(scene_->getRobotModel()));
+    if (cc->configure(constr.circle_constraints[l], scene_->getTransforms()))
+      return configure(IKSamplingPose(cc));
+  }
+
   return false;
 }
 
@@ -364,6 +410,26 @@ double IKConstraintSampler::getSamplingVolume() const
     
     v *= line_length * tolerance;
   }
+  // NEW
+  else if (sampling_pose_.circle_constraint_)
+  {
+  	
+  	//const Eigen::Vector3d circle_start = sampling_pose_.circle_constraint_->getCircleStart();
+    //const Eigen::Vector3d circle_end = sampling_pose_.circle_constraint_->getCircleEnd();
+    //const Eigen::Vector3d circle_center = sampling_pose_.circle_constraint_->getCircleCenter();
+
+    double phi1 = sampling_pose_.circle_constraint_->getCirclePhiStart();
+    double phi2 = sampling_pose_.circle_constraint_->getCirclePhiEnd();
+    double radius = sampling_pose_.circle_constraint_->getCircleRadius();
+   
+    //Eigen::Vector3d ac = circle_center - circle_start;
+    //Eigen::Vector3d bc = circle_end - circle_center;
+    //double arccos_ = acos(fabs(ac.dot(bc))/ (radius * radius) );
+
+    double tolerance = sampling_pose_.circle_constraint_->getTolerance();
+    
+    v *= (phi2-phi1) * radius * tolerance;
+  }
 
   if (sampling_pose_.orientation_constraint_)
     v *= sampling_pose_.orientation_constraint_->getXAxisTolerance() *
@@ -378,6 +444,8 @@ const std::string& IKConstraintSampler::getLinkName() const
     return sampling_pose_.orientation_constraint_->getLinkModel()->getName();
   else if (sampling_pose_.position_constraint_)
     return sampling_pose_.position_constraint_->getLinkModel()->getName();
+  else if (sampling_pose_.circle_constraint_)
+  	return sampling_pose_.circle_constraint_->getLinkModel()->getName();
   return sampling_pose_.line_constraint_->getLinkModel()->getName();
 }
 
@@ -444,7 +512,28 @@ bool IKConstraintSampler::loadIKSolver()
 
   if (!wrong_link && sampling_pose_.line_constraint_)
   {
+  	//ROS_INFO_STREAM("--- not wrong link, line constraint");
     const moveit::core::LinkModel* lm = sampling_pose_.line_constraint_->getLinkModel();
+    if (!robot_state::Transforms::sameFrame(kb_->getTipFrame(), lm->getName()))
+    {
+      wrong_link = true;
+      const moveit::core::LinkTransformMap& fixed_links = lm->getAssociatedFixedTransforms();
+      for (moveit::core::LinkTransformMap::const_iterator it = fixed_links.begin(); it != fixed_links.end(); ++it)
+        if (moveit::core::Transforms::sameFrame(it->first->getName(), kb_->getTipFrame()))
+        {
+          eef_to_ik_tip_transform_ = it->second;
+          need_eef_to_ik_tip_transform_ = true;
+          wrong_link = false;
+          break;
+        }
+    }
+  }
+
+  // NEW
+  if (!wrong_link && sampling_pose_.circle_constraint_)
+  {
+  	//ROS_INFO_STREAM("--- not wrong link, circle constraint");
+    const moveit::core::LinkModel* lm = sampling_pose_.circle_constraint_->getLinkModel();
     if (!robot_state::Transforms::sameFrame(kb_->getTipFrame(), lm->getName()))
     {
       wrong_link = true;
@@ -476,6 +565,8 @@ bool IKConstraintSampler::loadIKSolver()
 bool IKConstraintSampler::samplePose(Eigen::Vector3d& pos, Eigen::Quaterniond& quat, const robot_state::RobotState& ks,
                                      unsigned int max_attempts)
 {
+  //ROS_INFO_STREAM("--- sampling pose (cirlce): " << sampling_pose_.circle_constraint_);
+  //ROS_INFO_STREAM("--- sampling pose (line): " << sampling_pose_.line_constraint_);
   if (ks.dirtyLinkTransforms())
   {
     // samplePose below requires accurate transforms
@@ -518,10 +609,12 @@ bool IKConstraintSampler::samplePose(Eigen::Vector3d& pos, Eigen::Quaterniond& q
   }
   else if (sampling_pose_.line_constraint_)
   {
+  	//ROS_INFO_STREAM("--- here line constraint ---");
     double ratio = random_number_generator_.uniform01();
     const Eigen::Vector3d line_start = sampling_pose_.line_constraint_->getLineStart();
     const Eigen::Vector3d line_vector = sampling_pose_.line_constraint_->getLineVector();
 
+    //ROS_INFO_STREAM("--- line constraint ratio: " << ratio);
     pos = line_start + ratio * line_vector;
 
     // if this constraint is with respect a mobile frame, we need to convert this rotation to the root frame of the
@@ -530,6 +623,38 @@ bool IKConstraintSampler::samplePose(Eigen::Vector3d& pos, Eigen::Quaterniond& q
       pos = ks.getFrameTransform(sampling_pose_.line_constraint_->getReferenceFrame()) * pos;
     }
   }
+
+   // NEW
+  else if (sampling_pose_.circle_constraint_)
+  {
+    //double ratio = random_number_generator_.uniform01();
+
+    const Eigen::Vector3d circle_center = sampling_pose_.circle_constraint_->getCircleCenter();
+    double phi1 = sampling_pose_.circle_constraint_->getCirclePhiStart();
+    double phi2 = sampling_pose_.circle_constraint_->getCirclePhiEnd();
+    double r = sampling_pose_.circle_constraint_->getCircleRadius();
+
+    double ratio = random_number_generator_.uniformReal(phi1, phi2);
+  	//const Eigen::Vector3d circle_start = sampling_pose_.circle_constraint_->getCircleStart();
+    //const Eigen::Vector3d circle_end = sampling_pose_.circle_constraint_->getCircleEnd();
+
+    //ratio = phi1 + (phi2-phi1)*ratio;
+    //ratio = M_PI/2 - ratio;
+    // ROS_INFO_STREAM("ratio " << ratio);
+    Eigen::Vector3d pos_temp = circle_center + r*cos(ratio)*Eigen::Vector3d(1,0,0) + r*sin(ratio)*Eigen::Vector3d(0,1,0);
+    //Eigen::Vector3d pos_temp2 
+    //pos_temp[2] = circle_center.z()
+    //ROS_INFO_STREAM("--- pos :" << pos_temp);
+
+    pos = pos_temp;
+
+    // if this constraint is with respect a mobile frame, we need to convert this rotation to the root frame of the
+    // model
+    if (sampling_pose_.circle_constraint_->mobileReferenceFrame()) {
+      pos = ks.getFrameTransform(sampling_pose_.circle_constraint_->getReferenceFrame()) * pos;
+    }
+  }
+
   else
   {
     // do FK for rand state
@@ -678,6 +803,8 @@ bool IKConstraintSampler::validate(robot_state::RobotState& state) const
           sampling_pose_.orientation_constraint_->decide(state, verbose_).satisfied) &&
          (!sampling_pose_.position_constraint_ ||
           sampling_pose_.position_constraint_->decide(state, verbose_).satisfied) &&
+         (!sampling_pose_.circle_constraint_ ||
+          sampling_pose_.circle_constraint_->decide(state, verbose_).satisfied) &&
          (!sampling_pose_.line_constraint_ ||
           sampling_pose_.line_constraint_->decide(state, verbose_).satisfied);
 }

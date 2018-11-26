@@ -74,7 +74,8 @@ int ompl_interface::PoseModelStateSpaceFactory::canRepresentProblem(
       // if we have path constraints, we prefer interpolating in pose space
       if ((!req.path_constraints.position_constraints.empty() ||
            !req.path_constraints.orientation_constraints.empty() || 
-           !req.path_constraints.line_constraints.empty()) &&
+           !req.path_constraints.line_constraints.empty() ||
+           !req.path_constraints.circle_constraints.empty()) &&
           req.path_constraints.joint_constraints.empty() && req.path_constraints.visibility_constraints.empty())
         return 150;
       else

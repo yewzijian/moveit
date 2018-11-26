@@ -141,7 +141,7 @@ constraint_samplers::ConstraintSamplerPtr constraint_samplers::ConstraintSampler
   if (ik_alloc)
   {
     ROS_DEBUG_NAMED("constraint_samplers", "There is an IK allocator for '%s'. "
-                                           "Checking for corresponding position and/or orientation and/or line constraints",
+                                           "Checking for corresponding position and/or orientation and/or line and/or arc constraints",
                     jmg->getName().c_str());
 
     // keep track of which links we constrained
@@ -214,6 +214,39 @@ constraint_samplers::ConstraintSamplerPtr constraint_samplers::ConstraintSampler
                 ROS_DEBUG_NAMED("constraint_samplers", "Allocated an IK-based sampler for group '%s' "
                                                        "satisfying line and orientation constraints on link '%s'",
                                 jmg->getName().c_str(), constr.line_constraints[l].link_name.c_str());
+              }
+            }
+          }
+        }
+
+    // NEW
+    for (std::size_t l = 0; l < constr.circle_constraints.size(); ++l)
+      for (std::size_t o = 0; o < constr.orientation_constraints.size(); ++o)
+        if (constr.circle_constraints[l].link_name == constr.orientation_constraints[o].link_name)
+        {
+          kinematic_constraints::CircleConstraintPtr cc(
+              new kinematic_constraints::CircleConstraint(scene->getRobotModel()));
+          kinematic_constraints::OrientationConstraintPtr oc(
+              new kinematic_constraints::OrientationConstraint(scene->getRobotModel()));
+          if (cc->configure(constr.circle_constraints[l], scene->getTransforms()) &&
+              oc->configure(constr.orientation_constraints[o], scene->getTransforms()))
+          {
+            IKConstraintSamplerPtr iks(new IKConstraintSampler(scene, jmg->getName()));
+            if (iks->configure(IKSamplingPose(cc, oc)))
+            {
+              bool use = true;
+              // Check if there already is a constraint on this link
+              if (used_l.find(constr.circle_constraints[l].link_name) != used_l.end())
+                // If there is, check if the previous one has a smaller volume for sampling
+                if (used_l[constr.circle_constraints[l].link_name]->getSamplingVolume() < iks->getSamplingVolume())
+                  use = false;  // only use new constraint if it has a smaller sampling volume
+              if (use)
+              {
+                // assign the link to a new constraint sampler
+                used_l[constr.circle_constraints[l].link_name] = iks;
+                ROS_DEBUG_NAMED("constraint_samplers", "Allocated an IK-based sampler for group '%s' "
+                                                       "satisfying arc and orientation constraints on link '%s'",
+                                jmg->getName().c_str(), constr.circle_constraints[l].link_name.c_str());
               }
             }
           }
@@ -304,6 +337,36 @@ constraint_samplers::ConstraintSamplerPtr constraint_samplers::ConstraintSampler
             ROS_DEBUG_NAMED("constraint_samplers", "Allocated an IK-based sampler for group '%s' "
                                                    "satisfying line constraints on link '%s'",
                             jmg->getName().c_str(), constr.line_constraints[l].link_name.c_str());
+          }
+        }
+      }
+    }
+
+    // NEW
+    for (std::size_t l = 0; l < constr.circle_constraints.size(); ++l)
+    {
+      // if we are constraining this link with a full pose, we do not attempt to constrain it with an line
+      // constraint only
+      if (used_l_full_pose.find(constr.circle_constraints[l].link_name) != used_l_full_pose.end())
+        continue;
+
+      kinematic_constraints::CircleConstraintPtr cc(
+          new kinematic_constraints::CircleConstraint(scene->getRobotModel()));
+      if (cc->configure(constr.circle_constraints[l], scene->getTransforms()))
+      {
+        IKConstraintSamplerPtr iks(new IKConstraintSampler(scene, jmg->getName()));
+        if (iks->configure(IKSamplingPose(cc)))
+        {
+          bool use = true;
+          if (used_l.find(constr.circle_constraints[l].link_name) != used_l.end())
+            if (used_l[constr.circle_constraints[l].link_name]->getSamplingVolume() < iks->getSamplingVolume())
+              use = false;
+          if (use)
+          {
+            used_l[constr.circle_constraints[l].link_name] = iks;
+            ROS_DEBUG_NAMED("constraint_samplers", "Allocated an IK-based sampler for group '%s' "
+                                                   "satisfying line constraints on link '%s'",
+                            jmg->getName().c_str(), constr.circle_constraints[l].link_name.c_str());
           }
         }
       }

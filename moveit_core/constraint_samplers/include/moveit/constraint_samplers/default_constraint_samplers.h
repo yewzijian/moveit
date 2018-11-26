@@ -242,6 +242,15 @@ struct IKSamplingPose
    */
   IKSamplingPose(const kinematic_constraints::LineConstraint& lc);
 
+    /**
+   * \brief Constructor that takes a single line constraint, doing a copy
+   *
+   * @param cc The circle constraint that will be copied into the internal variable
+   *
+   * @return
+   */
+  IKSamplingPose(const kinematic_constraints::CircleConstraint& cc);
+
   /**
    * \brief Constructor that takes both a position and an orientation
    * constraint, copying both into the internal variables
@@ -264,6 +273,18 @@ struct IKSamplingPose
    * @return
    */
   IKSamplingPose(const kinematic_constraints::LineConstraint& lc,
+                 const kinematic_constraints::OrientationConstraint& oc);
+
+  /**
+   * \brief Constructor that takes both a line and a circle
+   * constraint, copying both into the internal variables
+   *
+   * @param cc arc constraint that will be copied into the internal variable
+   * @param oc orientation constraint that will be copied into the internal variable
+   *
+   * @return
+   */
+  IKSamplingPose(const kinematic_constraints::CircleConstraint& cc,
                  const kinematic_constraints::OrientationConstraint& oc);
 
   /**
@@ -294,6 +315,15 @@ struct IKSamplingPose
   IKSamplingPose(const kinematic_constraints::LineConstraintPtr& lc);
 
   /**
+   * \brief Constructor that takes a pointer to a line constraint.
+   *
+   * @param oc Pointer for copying into internal variable
+   *
+   * @return
+   */
+  IKSamplingPose(const kinematic_constraints::CircleConstraintPtr& cc);
+
+  /**
    * \brief Constructor that takes a pointer to both position and orientation constraints.
    *
    * @param pc Pointer for copying into internal variables
@@ -315,12 +345,25 @@ struct IKSamplingPose
   IKSamplingPose(const kinematic_constraints::LineConstraintPtr& lc,
                  const kinematic_constraints::OrientationConstraintPtr& oc);
 
+    /**
+   * \brief Constructor that takes a pointer to both arc and orientation constraints.
+   *
+   * @param cc Pointer for copying into internal variables
+   * @param oc Pointer for copying into internal variables
+   *
+   * @return
+   */
+  IKSamplingPose(const kinematic_constraints::CircleConstraintPtr& cc,
+                 const kinematic_constraints::OrientationConstraintPtr& oc);
+
+
   kinematic_constraints::PositionConstraintPtr position_constraint_; /**< \brief Holds the position constraint for
                                                                         sampling */
   kinematic_constraints::OrientationConstraintPtr
       orientation_constraint_; /**< \brief Holds the orientation constraint for sampling */
 
   kinematic_constraints::LineConstraintPtr line_constraint_;  /**< \brief Constrains the trajectory to follow a line */
+  kinematic_constraints::CircleConstraintPtr circle_constraint_;
 };
 
 MOVEIT_CLASS_FORWARD(IKConstraintSampler);

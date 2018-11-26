@@ -1044,6 +1044,213 @@ void VisibilityConstraint::print(std::ostream& out) const
   else
     out << "No constraint" << std::endl;
 }
+// MY CODE ON CIRCLE STARTS HERE
+
+// configure
+bool CircleConstraint::configure(const moveit_msgs::CircleConstraint& cc, const robot_state::Transforms& tf)
+{
+  // clearing before we configure to get rid of any old data
+  clear();
+
+  link_model_ = robot_model_->getLinkModel(cc.link_name);
+  if (link_model_ == nullptr)
+  {
+    ROS_WARN_NAMED("kinematic_constraints",
+                   "Position constraint link model %s not found in kinematic model. Constraint invalid.",
+                   cc.link_name.c_str());
+    return false;
+  }
+
+  if (cc.header.frame_id.empty())
+  {
+    ROS_WARN_NAMED("kinematic_constraints", "No frame specified for position constraint on link '%s'!",
+                   cc.link_name.c_str());
+    return false;
+  }
+
+
+  circle_start_ = Eigen::Vector3d(cc.circle_start.x, cc.circle_start.y, cc.circle_start.z);
+  circle_end_ = Eigen::Vector3d(cc.circle_end.x, cc.circle_end.y, cc.circle_end.z);
+  circle_center_ = Eigen::Vector3d(cc.circle_center.x, cc.circle_center.y, cc.circle_center.z);
+  circle_radius_ = cc.circle_radius;
+
+  const Eigen::Vector3d ac = circle_start_ - circle_center_;
+  const Eigen::Vector3d bc = circle_end_ - circle_center_;
+
+  // const Eigen::Vector3d ox = Eigen::Vector3d(0, circle_radius_, circle_center_.z()) - circle_center_;
+  // double ox_norm = ox.norm();
+
+  // double some_phi1 = acos(ac.dot( ox )/ (circle_radius_*ox_norm) );
+  // double some_phi2 = acos(bc.dot( ox )/ (circle_radius_*ox_norm) );
+  double some_phi1 = atan2(ac.y(), ac.x());
+  double some_phi2 = atan2(bc.y(), bc.x());
+
+  //if (some_phi1 < 0)
+  //  some_phi1 = 2*M_PI + some_phi1;
+  //if (some_phi2 < 0)
+  //  some_phi2 = 2*M_PI + some_phi2;
+
+
+
+  if (some_phi1 > some_phi2) {
+    phi_start_ = some_phi2;
+    phi_end_ = some_phi1;
+  }
+  else {
+    phi_start_ = some_phi1;
+    phi_end_ = some_phi2;
+  }
+  
+  ROS_INFO_STREAM("phi_start_: " << phi_start_); 
+  ROS_INFO_STREAM("phi_end_: " << phi_end_);
+
+  if (tf.isFixedFrame(cc.header.frame_id))
+  {
+    constraint_frame_id_ = tf.getTargetFrame();
+    mobile_frame_ = false;
+  }
+  else
+  {
+    constraint_frame_id_ = cc.header.frame_id;
+    mobile_frame_ = true;
+  }
+
+  if (cc.weight <= std::numeric_limits<double>::epsilon())
+  {
+    ROS_WARN_NAMED("kinematic_constraints",
+                   "The weight on position constraint for link '%s' is near zero.  Setting to 1.0.",
+                   cc.link_name.c_str());
+    constraint_weight_ = 1.0;
+  }
+  else
+    constraint_weight_ = cc.weight;
+
+  tolerance_ = fabs(cc.tolerance);
+  if (tolerance_ < std::numeric_limits<double>::epsilon())
+    ROS_WARN_NAMED("kinematic_constraints", "Near-zero value for arc tolerance");
+
+    return link_model_ != nullptr;
+}
+// equal
+bool CircleConstraint::equal(const KinematicConstraint& other, double margin) const
+{
+  if (other.getType() != type_)
+    return false;
+  const CircleConstraint& o = static_cast<const CircleConstraint&>(other);
+
+  if (link_model_ == o.link_model_ && robot_state::Transforms::sameFrame(constraint_frame_id_, o.constraint_frame_id_))
+  {
+    if ((circle_start_ - o.circle_start_).norm() > margin)
+      return false;
+    if ((circle_end_ - o.circle_end_).norm() > margin)
+      return false;
+    if ((circle_center_ - o.circle_center_).norm() > margin)
+      return false;
+    if (fabs(circle_radius_ - o.circle_radius_) > margin)
+    	return false;
+    return true;
+  }
+  return false;
+}
+// decide
+
+// helper function to avoid code duplication
+static inline ConstraintEvaluationResult finishCircleConstraintDecision(const Eigen::Vector3d& pt_p,
+                                                                      const Eigen::Vector3d& pt_center,
+                                                                      double radius,
+                                                                      double ph1, double ph2,
+                                                                      double tolerance)
+{
+  // given arc with start and end points (and corresponding angles),
+  // find the distance between arbitrary point p and arc
+
+  // if point p is out of range of arc
+  //double d1 = (pt_p - pt_start).norm();
+  //double d2 = (pt_p - pt_end).norm();
+  //double d_temp = 0;
+  //if(d1 > d2) d_temp = d2;
+  //else d_temp = d1;
+
+  // find angle
+  // const Eigen::Vector3d ox = Eigen::Vector3d(0, 1, pt_center.z()) - pt_center;
+  // double ox_norm = ox.norm();
+
+  const Eigen::Vector3d pc = pt_p - pt_center;
+
+  // double p_angle = acos(pc.dot( ox )/ (radius*ox_norm) );
+  double p_angle = atan2(pc.y(), pc.x());
+  //if (p_angle < 0)
+  //  p_angle = 2*M_PI + p_angle;
+
+
+  double d = 0;
+  //ROS_INFO_STREAM("--- point angle: " << p_angle);
+  if ( fabs(pt_p[2]-pt_center[2]) >= tolerance )
+  	return ConstraintEvaluationResult(false, 0.0);
+
+  if ( (ph1 - std::numeric_limits<double>::epsilon()<= p_angle) && (p_angle <= ph2 + std::numeric_limits<double>::epsilon()) )
+    d  = fabs( pc.norm() - radius );
+  else
+    return ConstraintEvaluationResult(false, 0.0);
+    //d = d_temp;
+
+  //ROS_INFO_STREAM("---circle distance: " << d);  
+  return ConstraintEvaluationResult(d <= tolerance, d);
+}
+
+ConstraintEvaluationResult CircleConstraint::decide(const robot_state::RobotState& state, bool verbose) const
+{
+  //ROS_INFO_STREAM("---H2");
+  if (!link_model_ || !enabled())
+    return ConstraintEvaluationResult(true, 0.0);
+
+  // globallinktransform transforms a point on the link to the global frame
+  Eigen::Vector3d pt = state.getGlobalLinkTransform(link_model_) * Eigen::Vector3d(0.0, 0.0, 0.0);
+
+  if (mobile_frame_)
+  {
+    // TODOZJ: Not checked
+    Eigen::Vector3d ptTransformed = state.getFrameTransform(constraint_frame_id_) * pt;
+    return finishCircleConstraintDecision(ptTransformed, circle_center_, circle_radius_, phi_start_, phi_end_, tolerance_);
+  }
+  else
+  {   
+    return finishCircleConstraintDecision(pt, circle_center_, circle_radius_, phi_start_, phi_end_, tolerance_);
+  }
+  return ConstraintEvaluationResult(false, 0.0);
+}
+
+// print
+void CircleConstraint::print(std::ostream& out) const
+{
+  if (enabled())
+    out << "Trajectory constraint on link '" << link_model_->getName() << "'" << std::endl;
+  else
+    out << "No constraint" << std::endl;
+}
+
+// clear
+void CircleConstraint::clear()
+{
+  circle_start_ = Eigen::Vector3d(0.0, 0.0, 0.0);
+  circle_end_ = Eigen::Vector3d(0.0, 0.0, 0.0);
+  circle_center_ = Eigen::Vector3d(0.0, 0.0, 0.0);
+  phi_start_ = 0.0;
+  phi_end_ = 0.0;
+  circle_radius_ = 0.0;
+  tolerance_ = 0.0;
+  mobile_frame_ = false;
+  constraint_frame_id_ = "";
+  link_model_ = nullptr;
+}
+// enabled
+bool CircleConstraint::enabled() const
+{
+  return link_model_ != nullptr;
+}
+
+
+// END OF MY CODE
 
 bool LineConstraint::configure(const moveit_msgs::LineConstraint& lc, const robot_state::Transforms& tf)
 {
@@ -1128,7 +1335,7 @@ static inline ConstraintEvaluationResult finishLineConstraintDecision(const Eige
   Eigen::Vector3d u_hat = dir_u.normalized();
   double u_mag = dir_u.norm();
   double extentOnLine = ap.dot(u_hat) / u_mag;
-  // ROS_INFO_STREAM("extentOnLine: " << extentOnLine);   //TODOZJ
+  //ROS_INFO_STREAM("---------extentOnLine: " << extentOnLine);   //TODOZJ
   if (extentOnLine >= 0 - std::numeric_limits<double>::epsilon()
       && extentOnLine <= 1 + std::numeric_limits<double>::epsilon()) {
     double d = ap.cross(dir_u).norm() / u_mag;
@@ -1275,6 +1482,23 @@ bool KinematicConstraintSet::add(const std::vector<moveit_msgs::LineConstraint>&
   return result;
 }
 
+// NEW
+bool KinematicConstraintSet::add(const std::vector<moveit_msgs::CircleConstraint>& cc,
+                                 const robot_state::Transforms& tf)
+{
+  bool result = true;
+  for (unsigned int i = 0; i < cc.size(); ++i)
+  {
+    CircleConstraint* ev = new CircleConstraint(robot_model_);
+    bool u = ev->configure(cc[i], tf);
+    result = result && u;
+    kinematic_constraints_.push_back(KinematicConstraintPtr(ev));
+    circle_constraints_.push_back(cc[i]);
+    all_constraints_.circle_constraints.push_back(cc[i]);
+  }
+  return result;
+}
+
 bool KinematicConstraintSet::add(const moveit_msgs::Constraints& c, const robot_state::Transforms& tf)
 {
   bool j = add(c.joint_constraints);
@@ -1282,7 +1506,8 @@ bool KinematicConstraintSet::add(const moveit_msgs::Constraints& c, const robot_
   bool o = add(c.orientation_constraints, tf);
   bool v = add(c.visibility_constraints, tf);
   bool l = add(c.line_constraints, tf);
-  return j && p && o && v && l;
+  bool c_c = add(c.circle_constraints, tf);
+  return j && p && o && v && l && c_c;
 }
 
 ConstraintEvaluationResult KinematicConstraintSet::decide(const robot_state::RobotState& state, bool verbose) const
